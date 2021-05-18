@@ -114,7 +114,7 @@ class CourseDateSummaryTest(SharedModuleStoreTestCase):
          {'verification_status': 'expired'},
          (TodaysDate, CourseEndDate, VerificationDeadlineDate)),
         # Verified enrollment with `approved` photo-verification during course run
-        ({'days_till_start': -10, },
+        ({'days_till_start': -10},
          {'verification_status': 'approved'},
          (TodaysDate, CourseEndDate)),
         # Verified enrollment with *NO* course end date
@@ -522,15 +522,16 @@ class CourseDateSummaryTest(SharedModuleStoreTestCase):
         user = create_user()
         CourseEnrollmentFactory(course_id=course.id, user=user, mode=CourseMode.VERIFIED)
         block = CourseEndDate(course, user)
-        assert block.description == 'To earn a certificate, you must complete all requirements before this date.'
+        assert block.description == ('This course will be archived, which means you can review the course content '
+                                     'but can no longer participate in graded assignments or earn a certificate.')
 
     def test_course_end_date_for_non_certificate_eligible_mode(self):
         course = create_course_run(days_till_start=-1)
         user = create_user()
         CourseEnrollmentFactory(course_id=course.id, user=user, mode=CourseMode.AUDIT)
         block = CourseEndDate(course, user)
-        assert block.description == 'After this date, course content will be archived.'
-        assert block.title == 'Course End'
+        assert block.description == 'After the course ends, the course content will be archived and no longer active.'
+        assert block.title == 'Course ends'
 
     def test_course_end_date_after_course(self):
         course = create_course_run(days_till_start=-2, days_till_end=-1)
@@ -539,35 +540,26 @@ class CourseDateSummaryTest(SharedModuleStoreTestCase):
         block = CourseEndDate(course, user)
         assert block.description ==\
                'This course is archived, which means you can review course content but it is no longer active.'
-        assert block.title == 'Course End'
+        assert block.title == 'Course ends'
 
-    @ddt.data(
-        {'weeks_to_complete': 7},  # Weeks to complete > time til end (end date shown)
-        {'weeks_to_complete': 4},  # Weeks to complete < time til end (end date not shown)
-    )
+    @ddt.data(300, 400)
     @override_waffle_flag(RELATIVE_DATES_FLAG, active=True)
-    def test_course_end_date_self_paced(self, cr_details):
+    def test_course_end_date_self_paced(self, days_till_end):
         """
-        In self-paced courses, the end date will now only show up if the learner
-        views the course within the course's weeks to complete (as defined in
-        the course-discovery service). E.g. if the weeks to complete is 5 weeks
-        and the course doesn't end for 10 weeks, there will be no end date, but
-        if the course ends in 3 weeks, the end date will appear.
+        In self-paced courses, the end date will only show up if the learner
+        views the course within 365 days of the course end date.
         """
         now = datetime.now(utc)
-        end_timedelta_number = 5
         course = CourseFactory.create(
-            start=now + timedelta(days=-7), end=now + timedelta(weeks=end_timedelta_number), self_paced=True)
+            start=now + timedelta(days=-7), end=now + timedelta(days=days_till_end), self_paced=True)
         user = create_user()
-        self.make_request(user)
-        with patch('lms.djangoapps.courseware.date_summary.get_course_run_details') as mock_get_cr_details:
-            mock_get_cr_details.return_value = cr_details
-            block = CourseEndDate(course, user)
-            assert block.title == 'Course End'
-            if cr_details['weeks_to_complete'] > end_timedelta_number:
-                assert block.date == course.end
-            else:
-                assert block.date is None
+        block = CourseEndDate(course, user)
+        assert block.title == 'Course ends'
+        if 365 > days_till_end:
+            assert block.date == course.end
+        else:
+            assert block.date is None
+            assert block.description == ''
 
     def test_ecommerce_checkout_redirect(self):
         """Verify the block link redirects to ecommerce checkout if it's enabled."""
