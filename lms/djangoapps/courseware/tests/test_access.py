@@ -16,6 +16,7 @@ from django.test import TestCase
 from django.test.client import RequestFactory
 from django.test.utils import override_settings
 from django.urls import reverse
+from edx_toggles.toggles.testutils import override_waffle_flag
 from milestones.tests.utils import MilestonesTestCaseMixin
 from opaque_keys.edx.locator import CourseLocator
 
@@ -24,6 +25,8 @@ import lms.djangoapps.courseware.access_response as access_response
 from lms.djangoapps.courseware.masquerade import CourseMasquerade
 from lms.djangoapps.courseware.tests.helpers import LoginEnrollmentTestCase, masquerade_as_group_member
 from lms.djangoapps.ccx.models import CustomCourseForEdX
+from openedx.core.djangoapps.agreements.api import create_integrity_signature
+from openedx.core.djangoapps.agreements.toggles import ENABLE_INTEGRITY_SIGNATURE
 from openedx.core.djangoapps.content.course_overviews.models import CourseOverview
 from openedx.core.djangoapps.waffle_utils.testutils import WAFFLE_TABLES
 from openedx.features.content_type_gating.models import ContentTypeGatingConfig
@@ -454,6 +457,33 @@ class AccessTestCase(LoginEnrollmentTestCase, ModuleStoreTestCase, MilestonesTes
         mock_unit.merged_group_access = {}
 
         self.verify_access(mock_unit, expected_access, expected_error_type)
+
+    @ddt.data(
+        ('verified', True, True),
+        ('verified', False, False),
+        ('masters', True, True),
+        ('masters', False, False),
+        ('audit', False, True),
+        ('audit', False, True),
+    )
+    @ddt.unpack
+    @override_waffle_flag(ENABLE_INTEGRITY_SIGNATURE, active=True)
+    def test__has_access_descriptor_integrity_signature(
+        self, enrollment_mode, has_integrity_signature, has_access,
+    ):
+        """
+        Tests that descriptor has access when integrity signature exists or the user is in audit mode.
+        """
+        mock_unit = Mock(location=self.course.location, user_partitions=[])
+        mock_unit._class_tags = {}  # Needed for detached check in _has_access_descriptor
+        mock_unit.visible_to_staff_only = False
+        mock_unit.merged_group_access = {}
+        CourseEnrollment.enroll(self.student, self.course.id, enrollment_mode)
+        if has_integrity_signature:
+            create_integrity_signature(self.student.username, str(self.course.id))
+
+        response = access._has_access_descriptor(self.student, 'load', mock_unit, course_key=self.course.id)
+        self.assertEqual(response.has_access, has_access)
 
     def test__has_access_course_can_enroll(self):
         yesterday = datetime.datetime.now(pytz.utc) - datetime.timedelta(days=1)

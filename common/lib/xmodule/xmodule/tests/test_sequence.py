@@ -10,13 +10,16 @@ from datetime import datetime, timedelta
 from unittest.mock import Mock, patch
 
 import ddt
+from django.contrib.auth import get_user_model
 from django.test import RequestFactory
 from django.test.utils import override_settings
 from django.utils.timezone import now
+from edx_toggles.toggles.testutils import override_waffle_flag
 from freezegun import freeze_time
 from web_fragments.fragment import Fragment
 
-from edx_toggles.toggles.testutils import override_waffle_flag
+from openedx.core.djangoapps.agreements.api import create_integrity_signature
+from openedx.core.djangoapps.agreements.toggles import ENABLE_INTEGRITY_SIGNATURE
 from openedx.features.content_type_gating.models import ContentTypeGatingConfig
 from xmodule.seq_module import TIMED_EXAM_GATING_WAFFLE_FLAG, SequenceBlock
 from xmodule.tests import get_test_system
@@ -29,6 +32,7 @@ TODAY = now()
 DUE_DATE = TODAY + timedelta(days=7)
 PAST_DUE_BEFORE_END_DATE = TODAY + timedelta(days=14)
 COURSE_END_DATE = TODAY + timedelta(days=21)
+User = get_user_model()
 
 
 @ddt.ddt
@@ -41,6 +45,7 @@ class SequenceBlockTestCase(XModuleXmlImportTest):
         super().setUp()
 
         course_xml = self._set_up_course_xml()
+        self.user = User.objects.create(username='bilbo')
         self.course = self.process_xml(course_xml)
         self._set_up_module_system(self.course)
 
@@ -457,6 +462,18 @@ class SequenceBlockTestCase(XModuleXmlImportTest):
         ))
         metadata = self.sequence_5_1.get_metadata()
         assert metadata['items'][0]['contains_content_type_gated_content'] is True
+
+    @ddt.data(False, True)
+    @override_waffle_flag(ENABLE_INTEGRITY_SIGNATURE, active=True)
+    def test_get_metadata_has_integrity_signature_false(self, has_integrity_signature):
+        """
+        The has_integrity_signature field is updated appropriately.
+        """
+        if has_integrity_signature:
+            create_integrity_signature(self.user.username, str(self.course.id))
+        self.sequence_3_1.xmodule_runtime._services['bookmarks'] = None  # lint-amnesty, pylint: disable=protected-access
+        metadata = self.sequence_3_1.get_metadata()
+        self.assertEqual(metadata['items'][0]['has_integrity_signature'], has_integrity_signature)
 
     def get_context_dict_from_string(self, data):
         """

@@ -33,6 +33,9 @@ from xmodule.x_module import (
     XModuleToXBlockMixin,
 )
 
+from openedx.core.djangoapps.agreements.api import get_integrity_signature
+from openedx.core.djangoapps.agreements.toggles import is_integrity_signature_enabled
+
 from .exceptions import NotFoundError
 from .fields import Date
 from .mako_module import MakoTemplateBlockBase
@@ -761,6 +764,13 @@ class SequenceBlock(
                 contains_content_type_gated_content = content_type_gating_service.check_children_for_content_type_gating_paywall(  # pylint:disable=line-too-long
                     item, self.course_id
                 ) is not None
+
+            has_integrity_signature = False
+            if is_integrity_signature_enabled():
+                integrity_signature = get_integrity_signature(context['username'], str(self.course_id))
+                if integrity_signature:
+                    has_integrity_signature = True
+
             iteminfo = {
                 'content': content,
                 'page_title': getattr(item, 'tooltip_title', ''),
@@ -770,6 +780,7 @@ class SequenceBlock(
                 'path': " > ".join(display_names + [item.display_name_with_default]),
                 'graded': item.graded,
                 'contains_content_type_gated_content': contains_content_type_gated_content,
+                'has_integrity_signature': has_integrity_signature,
             }
             if not render_items:
                 # The item url format can be defined in the template context like so:

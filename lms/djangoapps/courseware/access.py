@@ -43,7 +43,10 @@ from lms.djangoapps.ccx.custom_exception import CCXLocatorValidationException
 from lms.djangoapps.ccx.models import CustomCourseForEdX
 from lms.djangoapps.mobile_api.models import IgnoreMobileAvailableFlagConfig
 from lms.djangoapps.courseware.toggles import is_courses_default_invite_only_enabled
+from openedx.core.djangoapps.agreements.api import get_integrity_signature
+from openedx.core.djangoapps.agreements.toggles import is_integrity_signature_enabled
 from openedx.core.djangoapps.content.course_overviews.models import CourseOverview
+from openedx.core.djangoapps.enrollments.api import get_enrollment
 from openedx.features.course_duration_limits.access import check_course_expired
 from common.djangoapps.student import auth
 from common.djangoapps.student.models import CourseEnrollmentAllowed
@@ -561,6 +564,20 @@ def _has_access_descriptor(user, action, descriptor, course_key=None):
         group_access_response = _has_group_access(descriptor, user, course_key)
         if not group_access_response:
             return group_access_response
+
+        if is_integrity_signature_enabled():
+            # If the user's enrollment mode is non-audit, check if they have an integrity
+            # signature for the course, and deny access if not
+            course_id = str(course_key)
+            enrollment = get_enrollment(user.username, course_id)
+            if enrollment and enrollment.get('mode') != 'audit':
+                integrity_signature = get_integrity_signature(user.username, course_id)
+                if not integrity_signature:
+                    debug(
+                        'user_id={user_id} does not have an integrity signature for '
+                        'course_id={course_id}'.format(user_id=user.id, course_id=course_id)
+                    )
+                    return ACCESS_DENIED
 
         # If the user has staff access, they can load the module and checks below are not needed.
         staff_access_response = _has_staff_access_to_descriptor(user, descriptor, course_key)
